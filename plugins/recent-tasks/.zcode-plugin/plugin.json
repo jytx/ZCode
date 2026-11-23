@@ -1,0 +1,40 @@
+{
+  "name": "recent-tasks",
+  "version": "0.1.0",
+  "description": "最近任务面板：跨项目列出最近更新的任务，点击跳转到它所在的工作区和任务。",
+  "extension": {
+    "engines": { "zcode": "^1.4.0" },
+    "main": "./extension/index.mjs",
+    "activationEvents": ["onAvailable"],
+    "grants": ["sessions.write"],
+    "protocols": { "sessions": 1 },
+    "contributes": {
+      "views": [
+        {
+          "id": "recent-tasks",
+          "title": { "zh-CN": "最近任务", "en-US": "Recent tasks" },
+          "icon": "clock",
+          "scope": "app"
+        }
+      ]
+    }
+  },
+  "slots": {
+    "nav.primary": [
+      {
+        "id": "open",
+        "title": { "zh-CN": "最近任务", "en-US": "Recent tasks" },
+        "icon": "clock",
+        "target": { "view": "recent-tasks" }
+      }
+    ],
+    "sidePane.launcher": [
+      {
+        "id": "open-launcher",
+        "title": { "zh-CN": "最近任务", "en-US": "Recent tasks" },
+        "icon": "clock",
+        "target": { "view": "recent-tasks" }
+      }
+    ]
+  }
+}

@@ -1,0 +1,384 @@
+<!doctype html>
+<!-- 最近任务面板：跨项目列出最近更新的任务，点开可预览内容，一键跳转到它所在的工作区并选中它。
+     运行在宿主沙箱（CSP default-src none）：样式与脚本全部内联，禁止外部资源；沙箱只服务这一个 HTML 文件。
+     宿主桥 window.zcode：视图模型只走资源 ui://<pluginId>/state（订阅后被通知刷新），动作只走工具；
+     分组、排序、统计、相对时间与文案都在扩展进程做完，页面只做 DOM 渲染与事件分发。 -->
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>最近任务</title>
+<style>
+  /* 颜色优先用宿主下发的主题变量（握手后写入 :root）；握手完成前或变量缺失时用两套回退值，由 data-theme 切换。
+     回退取值与仓库内其他本地插件（subtask-panel）保持一致。 */
+  :root { color-scheme: light dark; --fb-bg: #ffffff; --fb-hover: #eceef1; --fb-fg: #1f2328; --fb-subtle: #6a737d;
+    --fb-border: #d8dce1; --fb-info: #1f6feb; --fb-warning: #9a6700; --fb-brand: #1f6feb; }
+  [data-theme="dark"] { --fb-bg: #1b1d21; --fb-hover: #2a2e35; --fb-fg: #e8eaed; --fb-subtle: #9aa0a8;
+    --fb-border: #33373e; --fb-info: #6ea8fe; --fb-warning: #d4a72c; --fb-brand: #5b9cf8; }
+  :root { --bg: var(--color-background-primary, var(--fb-bg)); --hover: var(--color-background-ghost, var(--fb-hover));
+    --fg: var(--color-foreground, var(--fb-fg)); --subtle: var(--color-foreground-subtle, var(--fb-subtle));
+    --border: var(--color-border-primary, var(--fb-border)); --info: var(--color-text-info, var(--fb-info));
+    --warning: var(--color-text-warning, var(--fb-warning)); --brand: var(--color-primary, var(--fb-brand));
+    --blue: var(--color-icon-blue, var(--fb-info));
+    --brand-fg: var(--color-primary-foreground, #ffffff); --font: var(--font-sans, -apple-system, "Segoe UI", "PingFang SC", sans-serif); }
+  * { box-sizing: border-box; } html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.5 var(--font); display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+  h1 { margin: 0; font-size: 14px; font-weight: 600; white-space: nowrap; }
+  #search { flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 6px; background: transparent;
+    color: var(--fg); font: inherit; padding: 4px 8px; }
+  #search:focus { outline: none; border-color: var(--brand); }
+  .toolbar { display: flex; align-items: center; gap: 12px; padding: 6px 16px 0; font-size: 12px; color: var(--subtle); }
+  .toolbar label { display: flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
+  .toolbar #count { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  button { border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--fg);
+    font: inherit; font-size: 12px; padding: 2px 8px; cursor: pointer; }
+  #mode { white-space: nowrap; }
+  /* 提示条的 display 规则必须限定在 :not([hidden]) 内：作者样式里的 display 会盖过 hidden 属性自带的隐藏效果，
+     否则提示条「隐藏」后仍然可见，残留上一次的文案和按钮。 */
+  #notice:not([hidden]) { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 16px 0;
+    padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; }
+  #notice button { border-color: transparent; background: var(--brand); color: var(--brand-fg); }
+  main { flex: 1; overflow-y: auto; padding: 8px; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  .row { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+  .row:hover, .row:focus-visible { background: var(--hover); outline: none; }
+  .row-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  /* 未读蓝点：与桌面侧栏同一个颜色变量（--color-icon-blue）。固定宽度的槽位保证
+     有无未读时标题的起始位置一致，列表不会因蓝点出现与否而左右跳动。 */
+  .row-dot { flex: none; width: 12px; display: flex; align-items: center; justify-content: center; }
+  .dot-unread { width: 7px; height: 7px; border-radius: 50%; background: var(--blue); }
+  .row-title { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row-meta { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 12px; color: var(--subtle); overflow: hidden; }
+  /* 目录名：跨项目时它是分辨「这条属于哪个项目」的唯一依据，用前景色区分于次要信息。 */
+  .row-meta .workspace { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--fg); }
+  .tag { flex: none; padding: 0 6px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; line-height: 16px; }
+  .tag-info { color: var(--info); border-color: currentColor; } .tag-warning { color: var(--warning); border-color: currentColor; }
+  .tag-new { color: var(--brand); border-color: currentColor; }
+  .state { padding: 40px 24px; text-align: center; color: var(--subtle); display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .state strong { font-size: 13px; color: var(--fg); }
+</style>
+</head>
+<body>
+  <header><h1 id="heading"></h1><input id="search" type="search" autocomplete="off" spellcheck="false"></header>
+  <div class="toolbar"><span id="count"></span>
+    <label><input id="archived" type="checkbox"><span id="archived-label"></span></label>
+  </div>
+  <p id="notice" hidden><span id="notice-text"></span><button id="notice-action" type="button" hidden></button></p>
+  <main id="list"></main>
+<script>
+// 面板页面的「核心」部分：状态、纯函数与宿主桥。
+//
+// 构建时（scripts/build-panel.mjs）与 panel-view.mjs 一起按顺序内联进 ui/index.html。
+// 与 view 分成两个文件是为了各自不超过 300 行：core 管状态与对外调用，view 管 DOM 渲染与事件分发；
+// 两块通过 window.__rt 交接，view 用 setRender 注册渲染函数，core 的操作完成后借此重绘。
+//
+// 约定：这里不写业务逻辑——排序、统计、相对时间与文案都由扩展进程算好（见 viewModel.mjs），
+// 页面只做 DOM 渲染与事件分发；所有可见文案都取自视图模型的 strings，页面不维护第二份文案表。
+"use strict";
+(() => {
+  // ---------------------------------------------------------------- 类型
+  /** @typedef {{sessionId: string, title: string, status: string, timeText: string, pinned: boolean, archived: boolean, unread: boolean, remote: boolean, offline: boolean, workspaceLabel: string, unseen: boolean, lastOpened: boolean}} Task */
+  /** @typedef {{strings: Record<string, string>, locale: string, flat: Task[], list: {phase: string, errorCode: string | null}, truncated: boolean, counts: {total: number, needsAttention: number, unseen: number}}} ViewModel */
+  /** @typedef {{key: string, values?: Record<string, string>, grant?: boolean}} Notice */
+
+  // ---------------------------------------------------------------- 状态（唯一来源；渲染只读它）
+  const state = {
+    /** @type {ViewModel | null} */ model: null,
+    query: "", showArchived: false,
+    /** @type {Notice | null} */ notice: null,
+  };
+  /** 视图模型资源的 URI，握手后从 resources/list 里找出来。 @type {string | null} */ let stateUri = null;
+  /** 变更通知的合并间隔（毫秒）：密集通知时只重读一次。 */
+  const RELOAD_INTERVAL_MS = 150;
+
+  // ---------------------------------------------------------------- 纯函数
+  /**
+   * 兜底文案：视图模型还没读到时（例如扩展进程是旧版本），界面也要能显示中文，
+   * 而不是一串英文键名。完整文案由扩展进程的视图模型给出，这里只覆盖界面骨架。
+   */
+  const FALLBACK_STRINGS = {
+    zh: {
+      title: "最近任务", search: "搜索标题", showArchived: "显示已归档", count: "{n} 个任务",
+      untitled: "未命名任务", running: "运行中", attention: "待处理", connecting: "正在读取任务列表…",
+      emptyTitle: "没有任务", emptyHint: "新任务会自动出现在这里。", noMatch: "没有匹配的任务",
+      needGrant: "需要授权后才能读取任务列表。", grant: "授权", listFailed: "任务列表暂时读不到（{code}）。",
+      retry: "重试", staleExtension: "扩展代码还是旧版本，请重启 ZCode 后再打开本面板。",
+      noStateResource: "没有找到任务列表数据，请重启 ZCode 后再打开本面板。", bridgeFailed: "面板没有连上宿主：{detail}",
+      unread: "未读",
+    },
+    en: {
+      title: "Recent tasks", search: "Search titles", showArchived: "Show archived", count: "{n} tasks",
+      untitled: "Untitled task", running: "Running", attention: "Needs attention", connecting: "Loading tasks…",
+      emptyTitle: "No tasks", emptyHint: "New tasks show up here automatically.", noMatch: "No matching tasks",
+      needGrant: "Authorization is needed to read the task list.", grant: "Authorize",
+      listFailed: "The task list is unavailable right now ({code}).", retry: "Retry",
+      staleExtension: "The extension is still running an old version. Restart ZCode and reopen this panel.",
+      noStateResource: "The task list data was not found. Restart ZCode and reopen this panel.",
+      bridgeFailed: "The panel could not reach the host: {detail}",
+      unread: "Unread",
+    },
+  };
+
+  /** 界面语言归一：locale 以 "zh" 开头用中文，否则英文。 @param {string | null | undefined} raw @returns {"zh" | "en"} */
+  function normalizeLocale(raw) { return typeof raw === "string" && raw.toLowerCase().startsWith("zh") ? "zh" : "en"; }
+  /** 文案模板：{name} 换成 values 里的值。优先用视图模型的文案，其次兜底文案，最后退回键名。 @param {string} key @param {Record<string, string>} [values] @returns {string} */
+  function t(key, values) {
+    // 视图模型还没读到时（扩展进程是旧版本），语言以宿主桥给的为准，兜底文案才有正确的语言。
+    const locale = state.model?.locale ?? window.zcode?.locale;
+    const strings = state.model?.strings ?? FALLBACK_STRINGS[normalizeLocale(locale)];
+    const template = strings[key] ?? key;
+    return values ? template.replace(/\{(\w+)\}/g, (_match, name) => values[name] ?? "") : template;
+  }
+  /** 过滤：默认隐藏已归档；关键字匹配标题。 @param {Task[]} tasks @returns {Task[]} */
+  function filterTasks(tasks) {
+    const keyword = state.query.trim().toLowerCase();
+    return tasks.filter((task) => (state.showArchived || !task.archived)
+      && (keyword === "" || task.title.toLowerCase().includes(keyword)));
+  }
+  /** 工具结果里的结构化数据；工具报错（isError）时为 null。 @param {{isError?: boolean, structuredContent?: unknown}} result */
+  function readData(result) { return result.isError === true ? null : /** @type {any} */ (result.structuredContent ?? null); }
+
+  // ---------------------------------------------------------------- 宿主桥
+  /** 跟随宿主：主题变量、明暗。宿主每次状态变化都会回调。 */
+  function applyHost() {
+    const host = window.zcode;
+    const variables = host.hostContext?.styles?.variables ?? {};
+    for (const [name, value] of Object.entries(variables)) {
+      if (typeof value === "string") document.documentElement.style.setProperty(name, value);
+    }
+    document.documentElement.dataset.theme = host.theme === "dark" ? "dark" : "light";
+    renderFn();
+  }
+  /** 调一个工具；失败抛出，由调用方给出提示。 @param {string} name @param {object} args @returns {Promise<any>} */
+  async function call(name, args) {
+    const data = readData(await window.zcode.callTool(name, args));
+    if (data === null) throw new Error("isError");
+    return data;
+  }
+  /** 重新读取视图模型。 @returns {Promise<void>} */
+  async function reload() {
+    try {
+      const result = await window.zcode.readResource(/** @type {string} */ (stateUri));
+      state.model = JSON.parse(result.contents[0].text);
+    } catch (error) {
+      state.notice = { key: "bridgeFailed", values: { detail: String(error instanceof Error ? error.message : error) } };
+    }
+    renderFn();
+  }
+  /**
+   * 收到变更通知后的重读：合并短时间内的多次通知。
+   * 宿主任务投影在流式输出时高频变化，逐次重读会让页面反复整份重建。
+   */
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let reloadTimer = null;
+  const scheduleReload = () => {
+    if (reloadTimer !== null) return;
+    reloadTimer = setTimeout(() => {
+      reloadTimer = null;
+      void reload();
+    }, RELOAD_INTERVAL_MS);
+  };
+  /** 打开任务：让主窗口切到它所在的工作区并选中它。 @param {string} sessionId @returns {Promise<void>} */
+  async function openTask(sessionId) {
+    try {
+      const data = await call("openTask", { sessionId });
+      if (data.ok) state.notice = null;
+      else if (data.code === "not-granted") state.notice = { key: "needGrant", grant: true };
+      else if (data.code === "forbidden") state.notice = { key: "openForbidden" };
+      else state.notice = { key: data.status === "unavailable" ? "openUnavailable" : "openFailed",
+        values: { detail: data.message ?? data.reason ?? data.code ?? "" } };
+    } catch (error) {
+      state.notice = { key: "openFailed", values: { detail: String(error instanceof Error ? error.message : error) } };
+    }
+    renderFn();
+  }
+
+  // ---------------------------------------------------------------- 启动
+  /** 入口：等宿主握手 → 找到视图模型资源并订阅 → 首次读取。控件事件由 view 绑定。 */
+  async function boot() {
+    renderFn(); // 桥就绪前先渲染默认文案，避免闪空白
+    if (!window.zcode) { state.notice = { key: "bridgeFailed", values: { detail: "window.zcode" } }; renderFn(); return; }
+    try {
+      await window.zcode.ready();
+      window.zcode.subscribe(applyHost);
+      applyHost();
+      const resources = await window.zcode.listResources();
+      const uris = resources.resources.map((resource) => resource.uri);
+      stateUri = uris.find((uri) => uri.endsWith("/state")) ?? null;
+      if (stateUri === null) {
+        // 扩展进程加载入口用的是 import()，命中 Node 的 ESM 模块缓存就不会重新读文件，
+        // 于是仍在跑旧版本：资源是 /tasks 而不是 /state。这种情况要明确告诉用户重启，
+        // 否则只会看到一句「面板没有连上宿主」，无从判断原因。
+        const stale = uris.some((uri) => uri.endsWith("/tasks"));
+        state.notice = { key: stale ? "staleExtension" : "noStateResource" };
+        renderFn();
+        return;
+      }
+      await window.zcode.subscribeResource(stateUri);
+      window.zcode.onResourceUpdated((uri) => { if (uri === stateUri) scheduleReload(); });
+      await reload();
+    } catch (error) {
+      state.notice = { key: "bridgeFailed", values: { detail: String(error instanceof Error ? error.message : error) } };
+      renderFn();
+    }
+  }
+
+  /** 渲染函数由 view 注册：core 的操作完成后要重绘，但渲染实现住在 view 里。 @type {() => void} */
+  let renderFn = () => {};
+  window.__rt = {
+    state, t, filterTasks, readData, boot,
+    call, openTask, reload,
+    /** @param {() => void} fn */
+    setRender(fn) { renderFn = fn; },
+  };
+})();
+
+</script>
+<script>
+// 面板页面的「视图」部分：DOM 渲染与事件分发。
+//
+// 构建时（scripts/build-panel.mjs）紧随 panel-core.mjs 内联进 ui/index.html。
+// core 暴露状态、纯函数与宿主桥（window.__rt），这里负责把它们画出来，并把交互转回 core。
+//
+// 分成两个文件是为了各自不超过 300 行；core 不 import 这里，靠 setRender 交接渲染函数。
+"use strict";
+(() => {
+  const rt = window.__rt;
+  const { state, t, filterTasks } = rt;
+  /** 取页面元素。 @param {string} id @returns {HTMLElement} */
+  const $ = (id) => /** @type {HTMLElement} */ (document.getElementById(id));
+
+  // ---------------------------------------------------------------- DOM 构造
+  /** @param {string} tag @param {string} className @param {string | null} text @returns {HTMLElement} */
+  function el(tag, className, text) {
+    // 只用 textContent 写入内容，标题等来自任务数据也不需要转义。
+    return Object.assign(document.createElement(tag), { className, textContent: text });
+  }
+  /** 一行的小标签：标题旁放状态，次要行放标记。 @param {import("./panel-core.mjs").Task} task */
+  function taskTags(task) {
+    /** @type {HTMLElement[]} */ const head = [];
+    /** @type {HTMLElement[]} */ const meta = [];
+    if (task.status === "running") head.push(el("span", "tag tag-info", t("running")));
+    if (task.status === "needs_attention") head.push(el("span", "tag tag-warning", t("attention")));
+    if (task.pinned) head.push(el("span", "tag", t("pinned")));
+    if (task.unseen) meta.push(el("span", "tag tag-new", t("unseen")));
+    if (task.lastOpened) meta.push(el("span", "tag", t("lastOpened")));
+    if (task.remote) meta.push(el("span", "tag", t("remote")));
+    if (task.offline) meta.push(el("span", "tag", t("offline")));
+    if (task.timeText) meta.push(el("span", "", task.timeText));
+    return { head, meta };
+  }
+
+  // ---------------------------------------------------------------- 渲染
+  /** 渲染一行任务。 @param {import("./panel-core.mjs").Task} task @returns {HTMLLIElement} */
+  function renderRow(task) {
+    const row = el("li", "row", null);
+    row.dataset.sessionId = task.sessionId;
+    const tags = taskTags(task);
+    const head = el("span", "row-head", null);
+    // 未读蓝点：与桌面侧栏同一份未读标记（宿主 tasks-index 的 unreadAt）。
+    // 放在标题前的固定槽位里，有无未读时标题的起始位置一致。
+    const slot = el("span", "row-dot", null);
+    if (task.unread) {
+      const mark = el("span", "dot-unread", null);
+      mark.title = t("unread");
+      slot.appendChild(mark);
+    }
+    head.appendChild(slot);
+    head.appendChild(el("span", "row-title", task.title || t("untitled")));
+    for (const tag of tags.head) head.appendChild(tag);
+    const meta = el("span", "row-meta", null);
+    // 目录名放在次要行开头：跨项目时这是分辨「这条属于哪个项目」的唯一依据。
+    if (task.workspaceLabel) meta.appendChild(el("span", "workspace", task.workspaceLabel));
+    for (const tag of tags.meta) meta.appendChild(tag);
+    row.append(head, meta);
+    return row;
+  }
+  /** 渲染说明性状态块。 @param {string} title @param {string} [hint] */
+  function renderState(title, hint) {
+    const block = el("div", "state", null);
+    block.appendChild(el("strong", "", title));
+    if (hint) block.appendChild(el("span", "", hint));
+    $("list").replaceChildren(block);
+  }
+  /** 提示条。 @param {import("./panel-core.mjs").Notice | null} notice */
+  function renderNotice(notice) {
+    $("notice").hidden = notice === null;
+    $("notice-text").textContent = notice === null ? "" : t(notice.key, notice.values);
+    $("notice-action").textContent = t(notice !== null && notice.key === "listFailed" ? "retry" : "grant");
+    $("notice-action").hidden = notice === null || notice.grant !== true;
+  }
+  /**
+   * 当前该显示的提示条：操作结果优先；没有操作结果时，列表订阅失败的原因也要说清楚
+   * （未授权时用户要在这里看到「授权」按钮）。
+   * @returns {import("./panel-core.mjs").Notice | null}
+   */
+  function currentNotice() {
+    if (state.notice !== null) return state.notice;
+    const list = state.model?.list;
+    if (!list || list.phase !== "failed") return null;
+    return list.errorCode === "not-granted"
+      ? { key: "needGrant", grant: true }
+      : { key: "listFailed", values: { code: list.errorCode ?? "" }, grant: true };
+  }
+  /** 全量重渲染。输入控件的值不在这里写，避免打断输入。 */
+  function render() {
+    const model = state.model;
+    $("count").textContent = "";
+    document.title = t("title");
+    document.documentElement.lang = model?.locale?.startsWith("zh") ? "zh-CN" : "en";
+    $("heading").textContent = t("title");
+    $("search").placeholder = t("search");
+    $("archived-label").textContent = t("showArchived");
+    renderNotice(currentNotice());
+    if (!model || (model.list.phase === "connecting" && model.counts.total === 0)) { renderState(t("connecting")); return; }
+    // 订阅失败（未授权等）：原因和入口都在提示条里，列表区不再显示误导性的空态文案。
+    if (model.list.phase === "failed") { $("list").replaceChildren(); return; }
+    const tasks = filterTasks(model.flat);
+    $("count").textContent = t("count", { n: String(tasks.length) }) + (model.truncated ? ` · ${t("truncated")}` : "");
+    if (tasks.length === 0) {
+      renderState(t(model.counts.total === 0 ? "emptyTitle" : "noMatch"), model.counts.total === 0 ? t("emptyHint") : undefined);
+      return;
+    }
+    const list = el("ul", "", null);
+    for (const task of tasks) list.appendChild(renderRow(task));
+    $("list").replaceChildren(list);
+  }
+
+  // ---------------------------------------------------------------- 事件
+  /** 列表区的点击：点一行就打开它。 @param {MouseEvent} event */
+  async function onListClick(event) {
+    const target = /** @type {HTMLElement} */ (event.target);
+    const sessionId = target.closest("[data-session-id]")?.dataset.sessionId;
+    if (sessionId) await rt.openTask(sessionId);
+  }
+
+  // ---------------------------------------------------------------- 启动
+  /** 绑定控件与列表事件，然后启动宿主桥。 */
+  function start() {
+    $("search").addEventListener("input", () => { state.query = $("search").value; render(); });
+    $("archived").addEventListener("change", () => { state.showArchived = $("archived").checked; render(); });
+    $("notice-action").addEventListener("click", async () => {
+      try {
+        const data = await rt.call("requestGrant", {});
+        if (!data.subscribed && (data.code || !data.allowed)) {
+          state.notice = { key: data.code ? "grantFailed" : "grantDenied", values: { detail: data.message ?? data.code ?? "" } };
+        }
+        await rt.reload();
+      } catch (error) {
+        state.notice = { key: "grantFailed", values: { detail: String(error instanceof Error ? error.message : error) } };
+        render();
+      }
+    });
+    $("list").addEventListener("click", (event) => { void onListClick(event); });
+    rt.setRender(render);
+    void rt.boot();
+  }
+  start();
+})();
+
+</script>
+
+</body>
+</html>

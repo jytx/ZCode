@@ -1,0 +1,72 @@
+<!doctype html>
+<!-- 最近任务面板：跨项目列出最近更新的任务，点开可预览内容，一键跳转到它所在的工作区并选中它。
+     运行在宿主沙箱（CSP default-src none）：样式与脚本全部内联，禁止外部资源；沙箱只服务这一个 HTML 文件。
+     宿主桥 window.zcode：视图模型只走资源 ui://<pluginId>/state（订阅后被通知刷新），动作只走工具；
+     分组、排序、统计、相对时间与文案都在扩展进程做完，页面只做 DOM 渲染与事件分发。 -->
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>最近任务</title>
+<style>
+  /* 颜色优先用宿主下发的主题变量（握手后写入 :root）；握手完成前或变量缺失时用两套回退值，由 data-theme 切换。
+     回退取值与仓库内其他本地插件（subtask-panel）保持一致。 */
+  :root { color-scheme: light dark; --fb-bg: #ffffff; --fb-hover: #eceef1; --fb-fg: #1f2328; --fb-subtle: #6a737d;
+    --fb-border: #d8dce1; --fb-info: #1f6feb; --fb-warning: #9a6700; --fb-brand: #1f6feb; }
+  [data-theme="dark"] { --fb-bg: #1b1d21; --fb-hover: #2a2e35; --fb-fg: #e8eaed; --fb-subtle: #9aa0a8;
+    --fb-border: #33373e; --fb-info: #6ea8fe; --fb-warning: #d4a72c; --fb-brand: #5b9cf8; }
+  :root { --bg: var(--color-background-primary, var(--fb-bg)); --hover: var(--color-background-ghost, var(--fb-hover));
+    --fg: var(--color-foreground, var(--fb-fg)); --subtle: var(--color-foreground-subtle, var(--fb-subtle));
+    --border: var(--color-border-primary, var(--fb-border)); --info: var(--color-text-info, var(--fb-info));
+    --warning: var(--color-text-warning, var(--fb-warning)); --brand: var(--color-primary, var(--fb-brand));
+    --blue: var(--color-icon-blue, var(--fb-info));
+    --brand-fg: var(--color-primary-foreground, #ffffff); --font: var(--font-sans, -apple-system, "Segoe UI", "PingFang SC", sans-serif); }
+  * { box-sizing: border-box; } html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.5 var(--font); display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+  h1 { margin: 0; font-size: 14px; font-weight: 600; white-space: nowrap; }
+  #search { flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 6px; background: transparent;
+    color: var(--fg); font: inherit; padding: 4px 8px; }
+  #search:focus { outline: none; border-color: var(--brand); }
+  .toolbar { display: flex; align-items: center; gap: 12px; padding: 6px 16px 0; font-size: 12px; color: var(--subtle); }
+  .toolbar label { display: flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
+  .toolbar #count { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  button { border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--fg);
+    font: inherit; font-size: 12px; padding: 2px 8px; cursor: pointer; }
+  #mode { white-space: nowrap; }
+  /* 提示条的 display 规则必须限定在 :not([hidden]) 内：作者样式里的 display 会盖过 hidden 属性自带的隐藏效果，
+     否则提示条「隐藏」后仍然可见，残留上一次的文案和按钮。 */
+  #notice:not([hidden]) { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 16px 0;
+    padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; }
+  #notice button { border-color: transparent; background: var(--brand); color: var(--brand-fg); }
+  main { flex: 1; overflow-y: auto; padding: 8px; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  .row { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+  .row:hover, .row:focus-visible { background: var(--hover); outline: none; }
+  .row-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  /* 未读蓝点：与桌面侧栏同一个颜色变量（--color-icon-blue）。固定宽度的槽位保证
+     有无未读时标题的起始位置一致，列表不会因蓝点出现与否而左右跳动。 */
+  .row-dot { flex: none; width: 12px; display: flex; align-items: center; justify-content: center; }
+  .dot-unread { width: 7px; height: 7px; border-radius: 50%; background: var(--blue); }
+  .row-title { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row-meta { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 12px; color: var(--subtle); overflow: hidden; }
+  /* 目录名：跨项目时它是分辨「这条属于哪个项目」的唯一依据，用前景色区分于次要信息。 */
+  .row-meta .workspace { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--fg); }
+  .tag { flex: none; padding: 0 6px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; line-height: 16px; }
+  .tag-info { color: var(--info); border-color: currentColor; } .tag-warning { color: var(--warning); border-color: currentColor; }
+  .tag-new { color: var(--brand); border-color: currentColor; }
+  .state { padding: 40px 24px; text-align: center; color: var(--subtle); display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .state strong { font-size: 13px; color: var(--fg); }
+</style>
+</head>
+<body>
+  <header><h1 id="heading"></h1><input id="search" type="search" autocomplete="off" spellcheck="false"></header>
+  <div class="toolbar"><span id="count"></span>
+    <label><input id="archived" type="checkbox"><span id="archived-label"></span></label>
+  </div>
+  <p id="notice" hidden><span id="notice-text"></span><button id="notice-action" type="button" hidden></button></p>
+  <main id="list"></main>
+<!--__PANEL_SCRIPTS__-->
+
+</body>
+</html>

@@ -1,0 +1,7 @@
+{
+  "name": "recent-tasks",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ZCode 最近任务扩展：跨项目列出最近任务并一键跳转。零第三方依赖，无构建链。"
+}
