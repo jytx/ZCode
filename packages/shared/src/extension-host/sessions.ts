@@ -24,12 +24,16 @@ const sessionIdSchema = z.string().min(1).max(200);
 /**
  * 列表行 v1：从 session-control 的摘要派生，去掉只对模型有意义的 availableActions 与 executionId，
  * 加上来源在线状态。session 与写操作的会话引用同一格式，读出来就能直接传给写操作。
+ *
+ * unreadAt 是 tasks-index 的未读标记（毫秒时间戳），与桌面侧栏蓝点读的是同一份数据；
+ * 只加字段不升版（§17.6）。
  */
 export const sessionListRowSchema = sessionSummarySchema
   .omit({ session: true, availableActions: true, executionId: true })
   .extend({
     session: appSessionRefSchema,
     sourceAvailability: z.enum(["online", "offline"]),
+    unreadAt: z.number().int().nonnegative().optional(),
   });
 export type SessionListRow = z.infer<typeof sessionListRowSchema>;
 

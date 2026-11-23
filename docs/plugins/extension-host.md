@@ -1296,12 +1296,12 @@ sessionReads（每个连接一份，换代或断开时整体释放）
 - 会话解析每次登记都做一次（不同插件各自解析），所以授权与目标检查与 `sessions.readSession` 相同。`readRows` 同样先解析，再经同一个作用域调 `conversationRowsRangeV4`（会话不在内存时 CLI 冷恢复，与手机相同）。
 - 镜像预算按窗口里各行的 JSON 字节算：超过 8 MiB 时从最旧的行丢起，丢掉的行仍可用 `readRows` 读到。丢掉的旧行之后再被更新，镜像不再推它（旧行很少更新）。
 - 单个事件按 JSON 字节超过 1 MiB 时改推 `stale`，插件用 `readRows` 补读。
-- 列表泵：Window Host 宿主把控制器投影以 `taskRows: { read, subscribe }` 注入（只在本进程内）。有列表订阅者时才订阅投影，最后一个退订时退订。行映射：`session = { kind: "app", sourceServerId: address.sourceServerId ?? 本机, workspacePath, workspaceIdentity?, sessionId: taskId }`，`title`、`updatedAt`（ISO）、`archived` / `pinned`（membership）、`sourceAvailability`；`status` 由 `liveStatus` 映射：`running` → `running`，`waiting` → `needs_attention`，其余 → `idle`。投影没有项目归属，所以引用不带 `project`（写操作接受不带项目的引用）。按 `updatedAt` 降序取前 1000 行，多出时 `truncated: true`；增量按这 1000 行算，掉出前 1000 的行在增量里算 `removed`。投影的每次回调都按映射后的行比较，内容没变不推（流式期间的活动时间变化不会产生增量）。
+- 列表泵：Window Host 宿主把控制器投影以 `taskRows: { read, subscribe }` 注入（只在本进程内）。有列表订阅者时才订阅投影，最后一个退订时退订。行映射：`session = { kind: "app", sourceServerId: address.sourceServerId ?? 本机, workspacePath, workspaceIdentity?, sessionId: taskId }`，`title`、`updatedAt`（ISO）、`archived` / `pinned`（membership）、`unreadAt`（未读标记，毫秒时间戳；桌面侧栏蓝点同一份 tasks-index 数据，字段缺席即已读）、`sourceAvailability`；`status` 由 `liveStatus` 映射：`running` → `running`，`waiting` → `needs_attention`，其余 → `idle`。投影没有项目归属，所以引用不带 `project`（写操作接受不带项目的引用）。按 `updatedAt` 降序取前 1000 行，多出时 `truncated: true`；增量按这 1000 行算，掉出前 1000 的行在增量里算 `removed`。投影的每次回调都按映射后的行比较，内容没变不推（流式期间的活动时间变化不会产生增量）。
 
 ### 17.6 稳定投影
 
 - `SESSIONS_PROJECTION_VERSION = 1`。只加字段不升版；删字段或改含义才升版。清单声明的版本对不上报 `incompatible`。
-- 列表行 v1 从 session-control 派生：`sessionSummarySchema.omit({availableActions, executionId}).extend({ session, sourceAvailability })`。会话引用与写操作同一格式，读出来就能直接传给写操作。
+- 列表行 v1 从 session-control 派生：`sessionSummarySchema.omit({availableActions, executionId}).extend({ session, sourceAvailability, unreadAt? })`。会话引用与写操作同一格式，读出来就能直接传给写操作。`unreadAt` 只加字段不升版。
 - 正文 v1：`readSession(view:"messages")` 的 `{id, role, text}`。
 - 完整行：`WireConversationRow` 加读不懂时的占位行，清单写 `protocols.rows: 4`，跟 v4 协议走（版本耦合已接受）。
 - 永远不暴露：凭据、provider 配置、OAuth、环境变量；附件字节；遥测、TTFT、CUA 观察、插件 UI 结果；快照里行以外的部分（queue、config 里除权限模式以外的字段）；别的插件的设置与审计；工作区 Hook 信任审查与插件安装确认这两种交互。

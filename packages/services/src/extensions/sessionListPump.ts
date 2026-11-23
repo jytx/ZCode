@@ -70,6 +70,8 @@ function toRow(task: WindowHostControllerTaskRow, localSourceServerId: string): 
     title: meta.title,
     status: statusOf(task.liveStatus),
     ...(meta.updatedAt ? { updatedAt: new Date(meta.updatedAt).toISOString() } : {}),
+    // 未读标记：与桌面侧栏蓝点同一份 tasks-index 数据（unreadAt 存在即未读）。
+    ...(meta.unreadAt != null ? { unreadAt: meta.unreadAt } : {}),
     archived: membership.archived,
     pinned: membership.pinned,
     sourceAvailability: task.sourceAvailability,
