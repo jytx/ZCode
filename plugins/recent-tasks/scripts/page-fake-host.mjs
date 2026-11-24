@@ -201,7 +201,7 @@ export const model = (options) => {
   const flat = options?.flat ?? [row("a", "修登录 bug", "running"), row("b", "写周报", "needs_attention")];
   return {
     strings: options?.strings ?? {
-      title: "最近任务", search: "搜索标题", showArchived: "显示已归档", groupByProject: "按项目", groupByTime: "按时间",
+      title: "最近任务", search: "搜索标题或目录", showArchived: "显示已归档", groupByProject: "按项目", groupByTime: "按时间",
       count: "{n} 个任务", groupCount: "{n} 个", untitled: "未命名任务", pinned: "置顶", remote: "远程", offline: "离线",
       unseen: "有新进展", unread: "未读", lastOpened: "上次看的", running: "运行中", attention: "待处理", opening: "正在打开…", justNow: "刚刚",
       connecting: "正在读取任务列表…", emptyTitle: "没有任务", emptyHint: "新任务会自动出现在这里。", noMatch: "没有匹配的任务",

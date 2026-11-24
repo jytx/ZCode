@@ -63,7 +63,7 @@ export function formatRelativeTime(iso, now, locale, translate) {
  */
 const TEXTS = {
   title: { zh: "最近任务", en: "Recent tasks" },
-  search: { zh: "搜索标题", en: "Search titles" },
+  search: { zh: "搜索标题或目录", en: "Search titles or folders" },
   showArchived: { zh: "显示已归档", en: "Show archived" },
   count: { zh: "{n} 个任务", en: "{n} tasks" },
   untitled: { zh: "未命名任务", en: "Untitled task" },

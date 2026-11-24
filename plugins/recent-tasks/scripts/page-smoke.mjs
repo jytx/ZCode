@@ -152,6 +152,23 @@ const cases = [
     }
   }],
 
+  ["搜索也匹配目录名", async () => {
+    const flat = [
+      row("a", "修登录 bug", "idle", { workspaceLabel: "shop-api" }),
+      row("b", "写周报", "idle", { workspaceLabel: "web-console" }),
+    ];
+    const { doc } = await mount({ model: model({ flat }), tools: {} });
+    element(doc, "search").value = "console";
+    element(doc, "search").dispatch("input");
+    assert.deepEqual(titles(doc), ["写周报"], "按目录名也要能搜到");
+    element(doc, "search").value = "修登录";
+    element(doc, "search").dispatch("input");
+    assert.deepEqual(titles(doc), ["修登录 bug"], "按标题搜仍然有效");
+    element(doc, "search").value = "shop";
+    element(doc, "search").dispatch("input");
+    assert.deepEqual(titles(doc), ["修登录 bug"]);
+  }],
+
   ["搜索过滤标题，隐藏已归档任务", async () => {
     const flat = [row("a", "修登录 bug", "idle"), { ...row("b", "旧任务", "idle"), archived: true }];
     const { doc } = await mount({ model: model({ flat }), tools: {} });
@@ -211,7 +228,7 @@ const cases = [
     assert.equal(element(doc, "notice-action").hidden, true);
     // 视图模型读不到，界面用兜底文案（中文），不是英文键名。
     assert.equal(element(doc, "heading").textContent, "最近任务");
-    assert.equal(element(doc, "search").placeholder, "搜索标题");
+    assert.equal(element(doc, "search").placeholder, "搜索标题或目录");
     assert.deepEqual(page.calls.filter(([kind]) => kind === "readResource"), []);
   }],
 

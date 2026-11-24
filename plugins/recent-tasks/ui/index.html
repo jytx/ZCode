@@ -99,7 +99,7 @@
    */
   const FALLBACK_STRINGS = {
     zh: {
-      title: "最近任务", search: "搜索标题", showArchived: "显示已归档", count: "{n} 个任务",
+      title: "最近任务", search: "搜索标题或目录", showArchived: "显示已归档", count: "{n} 个任务",
       untitled: "未命名任务", running: "运行中", attention: "待处理", connecting: "正在读取任务列表…",
       emptyTitle: "没有任务", emptyHint: "新任务会自动出现在这里。", noMatch: "没有匹配的任务",
       needGrant: "需要授权后才能读取任务列表。", grant: "授权", listFailed: "任务列表暂时读不到（{code}）。",
@@ -108,7 +108,7 @@
       unread: "未读",
     },
     en: {
-      title: "Recent tasks", search: "Search titles", showArchived: "Show archived", count: "{n} tasks",
+      title: "Recent tasks", search: "Search titles or folders", showArchived: "Show archived", count: "{n} tasks",
       untitled: "Untitled task", running: "Running", attention: "Needs attention", connecting: "Loading tasks…",
       emptyTitle: "No tasks", emptyHint: "New tasks show up here automatically.", noMatch: "No matching tasks",
       needGrant: "Authorization is needed to read the task list.", grant: "Authorize",
@@ -130,11 +130,22 @@
     const template = strings[key] ?? key;
     return values ? template.replace(/\{(\w+)\}/g, (_match, name) => values[name] ?? "") : template;
   }
-  /** 过滤：默认隐藏已归档；关键字匹配标题。 @param {Task[]} tasks @returns {Task[]} */
+  /**
+   * 关键字命中：标题，或所属工作区的目录名。
+   * 目录名要一起搜——跨项目时「这条属于哪个项目」只能靠目录名分辨，
+   * 用户想找某个项目时，多半只记得项目名而不是任务标题。
+   * @param {Task} task
+   * @param {string} keyword 已转成小写的关键字
+   * @returns {boolean}
+   */
+  function matchesKeyword(task, keyword) {
+    return task.title.toLowerCase().includes(keyword) || task.workspaceLabel.toLowerCase().includes(keyword);
+  }
+  /** 过滤：默认隐藏已归档；关键字匹配标题或目录名。 @param {Task[]} tasks @returns {Task[]} */
   function filterTasks(tasks) {
     const keyword = state.query.trim().toLowerCase();
     return tasks.filter((task) => (state.showArchived || !task.archived)
-      && (keyword === "" || task.title.toLowerCase().includes(keyword)));
+      && (keyword === "" || matchesKeyword(task, keyword)));
   }
   /** 工具结果里的结构化数据；工具报错（isError）时为 null。 @param {{isError?: boolean, structuredContent?: unknown}} result */
   function readData(result) { return result.isError === true ? null : /** @type {any} */ (result.structuredContent ?? null); }
